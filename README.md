@@ -6,8 +6,6 @@ To set the space to opened just send a GET-Request to \<IP-ADDRESS\>:1337/[open:
 While compilation the following environment variables shall be passed to the compiler:
 - TELEGRAM_API_TOKEN
 - TELEGRAM_CHAT_ID
-- SHARED_SECRET
+- API_KEY
 ## authorization
-The SHARED_SECRET should be a random 256bit value, which must be known by client and server. For every request to the API an auth-token header is expected. To generate the token:
-- Send a GET-Request to /auth_challenge
-- Hmac\<Sha3_512\> the auth-challenge header with the shared secret as the salt 
+Append an `Api-Key` header to every request, which contains the api key specified while compiling.

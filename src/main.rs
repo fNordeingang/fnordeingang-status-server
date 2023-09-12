@@ -1,3 +1,5 @@
+#![feature(result_option_inspect)]
+
 use crate::server::APIEvent;
 use log::info;
 
