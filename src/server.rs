@@ -1,25 +1,25 @@
-use std::{sync::atomic::{AtomicBool, Ordering, AtomicU64}, time::UNIX_EPOCH};
+use std::{
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    time::UNIX_EPOCH,
+};
 
+use actix_cors::Cors;
 use actix_web::{
     get, http::StatusCode, web, App, HttpRequest, HttpResponse, HttpServer, Responder,
 };
 use log::{error, info, warn};
-use spaceapi::{StatusBuilder, Location, Contact};
+use spaceapi::{Contact, Location, StatusBuilder};
 
 const API_KEY: &'static str = env!("API_KEY");
 
 fn is_api_key_valid(req: &HttpRequest) -> bool {
-    match req
-        .headers()
-        .get("Api-Key")
-        .map(|x| x.to_str().unwrap())
-    {
+    match req.headers().get("Api-Key").map(|x| x.to_str().unwrap()) {
         Some(API_KEY) => true,
         Some(api_key) => {
             info!("Api key: {api_key} is invalid.");
             false
-        },
-        _ => false
+        }
+        _ => false,
     }
 }
 
@@ -146,6 +146,7 @@ pub async fn run(tx: tokio::sync::broadcast::Sender<APIEvent>) {
     HttpServer::new(move || {
         let state = state.clone();
         App::new()
+            .wrap(Cors::default().allow_any_origin())
             .service(open)
             .service(close)
             .service(index)
