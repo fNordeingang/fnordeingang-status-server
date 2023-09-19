@@ -153,7 +153,7 @@ pub async fn run(tx: tokio::sync::broadcast::Sender<APIEvent>) {
             .service(spaceapi_json)
             .app_data(state)
     })
-    .bind("[::]:1337")
+    .bind("[::]:13337")
     .expect("Failed to bind to address.")
     .run()
     .await
