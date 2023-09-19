@@ -14,7 +14,6 @@ async fn main() {
     let (tx, _rx) = tokio::sync::broadcast::channel::<APIEvent>(1);
 
     futures::join!(
-        actions::spaceapi::run_spaceapi_server(tx.subscribe()),
         actions::telegram::run_telegram_bot(tx.subscribe()),
         server::run(tx)
     );
