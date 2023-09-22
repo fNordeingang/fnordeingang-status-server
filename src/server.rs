@@ -1,9 +1,10 @@
 use std::{
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
-    time::UNIX_EPOCH,
+    time::{Duration, UNIX_EPOCH},
 };
 
 use actix_cors::Cors;
+use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{
     get, http::StatusCode, web, App, HttpRequest, HttpResponse, HttpServer, Responder,
 };
@@ -42,7 +43,6 @@ impl State {
         self.last_changed.store(time, Ordering::Relaxed);
     }
 }
-#[get("/open")]
 async fn open(req: HttpRequest, data: web::Data<State>) -> impl Responder {
     req.peer_addr()
         .inspect(|peer_addr| info!("Received GET to /open from {peer_addr}."));
@@ -67,7 +67,6 @@ async fn open(req: HttpRequest, data: web::Data<State>) -> impl Responder {
         HttpResponse::AlreadyReported()
     }
 }
-#[get("/close")]
 async fn close(req: HttpRequest, data: web::Data<State>) -> impl Responder {
     req.peer_addr()
         .inspect(|peer_addr| info!("Received GET to /close from {peer_addr}."));
@@ -143,12 +142,25 @@ pub async fn run(tx: tokio::sync::broadcast::Sender<APIEvent>) {
         open: AtomicBool::new(false),
         last_changed: AtomicU64::new(0),
     });
+    let governor_config = GovernorConfigBuilder::default()
+        .period(Duration::from_secs(600))
+        .burst_size(1)
+        .finish()
+        .unwrap();
     HttpServer::new(move || {
         let state = state.clone();
         App::new()
             .wrap(Cors::default().allow_any_origin())
-            .service(open)
-            .service(close)
+            .service(
+                web::resource("/open")
+                    .wrap(Governor::new(&governor_config))
+                    .route(web::get().to(open)),
+            )
+            .service(
+                web::resource("/close")
+                    .wrap(Governor::new(&governor_config))
+                    .route(web::get().to(close)),
+            )
             .service(index)
             .service(spaceapi_json)
             .app_data(state)

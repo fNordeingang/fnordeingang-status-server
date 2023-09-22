@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 actix-cors = "0.6.4"
+actix-governor = "0.4.1"
 actix-web = "4.3.1"
 actix-web-httpauth = "0.8.0"
 env_logger = "0.10.0"
