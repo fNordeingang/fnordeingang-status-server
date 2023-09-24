@@ -8,15 +8,18 @@ actix-cors = "0.6.4"
 actix-governor = "0.4.1"
 actix-web = "4.3.1"
 actix-web-httpauth = "0.8.0"
+clap = { version = "4.4.4", features = ["derive"] }
 env_logger = "0.10.0"
 futures = { version = "0.3.28", default-features = false, features = ["async-await"] }
 hex = "0.4.3"
 hmac = "0.12.1"
 log = "0.4.17"
 rand = "0.8.5"
+serde = { version = "1.0.188", features = ["derive"] }
 serde_json = "1.0.96"
 sha3 = "0.10.8"
 spaceapi = "0.9.0"
 teloxide = { version = "0.12.2", features = ["rustls"] }
 tokio = { version = "1.28.1", features = ["full"] }
+toml = "0.8.0"
 

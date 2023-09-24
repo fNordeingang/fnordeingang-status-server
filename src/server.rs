@@ -11,17 +11,10 @@ use actix_web::{
 use log::{error, info, warn};
 use spaceapi::{Contact, Location, StatusBuilder};
 
-const API_KEY: &'static str = env!("API_KEY");
+use crate::{Config, API_KEY};
 
 fn is_api_key_valid(req: &HttpRequest) -> bool {
-    match req.headers().get("Api-Key").map(|x| x.to_str().unwrap()) {
-        Some(API_KEY) => true,
-        Some(api_key) => {
-            info!("Api key: {api_key} is invalid.");
-            false
-        }
-        _ => false,
-    }
+    req.headers().get("Api-Key").map(|x| x.to_str().unwrap().to_string()) == API_KEY.get().cloned()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -43,6 +36,7 @@ impl State {
         self.last_changed.store(time, Ordering::Relaxed);
     }
 }
+#[get("/open")]
 async fn open(req: HttpRequest, data: web::Data<State>) -> impl Responder {
     req.peer_addr()
         .inspect(|peer_addr| info!("Received GET to /open from {peer_addr}."));
@@ -67,6 +61,7 @@ async fn open(req: HttpRequest, data: web::Data<State>) -> impl Responder {
         HttpResponse::AlreadyReported()
     }
 }
+#[get("/close")]
 async fn close(req: HttpRequest, data: web::Data<State>) -> impl Responder {
     req.peer_addr()
         .inspect(|peer_addr| info!("Received GET to /close from {peer_addr}."));
@@ -136,30 +131,27 @@ async fn index(req: HttpRequest) -> impl Responder {
         .inspect(|peer_addr| info!("Received GET to /open from {peer_addr}."));
     ("I'm an API not a webserver.", StatusCode::IM_A_TEAPOT)
 }
-pub async fn run(tx: tokio::sync::broadcast::Sender<APIEvent>) {
+pub async fn run(tx: tokio::sync::broadcast::Sender<APIEvent>, config: Config) {
     let state = web::Data::new(State {
         tx,
         open: AtomicBool::new(false),
         last_changed: AtomicU64::new(0),
     });
     let governor_config = GovernorConfigBuilder::default()
-        .period(Duration::from_secs(600))
-        .burst_size(1)
+        .period(Duration::from_secs(config.rate_limiter_timeout.unwrap_or(300) as u64))
+        .burst_size(config.rate_limiter_tokens.unwrap_or(2) as u32)
         .finish()
         .unwrap();
+
     HttpServer::new(move || {
         let state = state.clone();
         App::new()
             .wrap(Cors::default().allow_any_origin())
             .service(
-                web::resource("/open")
+                web::scope("/api")
                     .wrap(Governor::new(&governor_config))
-                    .route(web::get().to(open)),
-            )
-            .service(
-                web::resource("/close")
-                    .wrap(Governor::new(&governor_config))
-                    .route(web::get().to(close)),
+                    .service(open)
+                    .service(close),
             )
             .service(index)
             .service(spaceapi_json)
