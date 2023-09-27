@@ -100,8 +100,8 @@ async fn spaceapi_json(req: HttpRequest, data: web::Data<State>) -> impl Respond
         })
         .location(Location {
             address: Some("Körnerstr. 72, 41464 Neuss, Germany".to_string()),
-            lat: 6.692624,
-            lon: 51.186234,
+            lat: 51.186234,
+            lon: 6.692624,
             ..Default::default()
         })
         .contact(Contact {
@@ -112,6 +112,7 @@ async fn spaceapi_json(req: HttpRequest, data: web::Data<State>) -> impl Respond
         })
         .add_project("http://github.com/fnordeingang")
         .add_issue_report_channel(spaceapi::IssueReportChannel::IssueMail)
+        .add_extension("ccc", "chaostreff")
         .build();
     match status {
         Ok(status) => {
