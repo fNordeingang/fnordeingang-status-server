@@ -11,7 +11,8 @@ mod server;
 
 pub(crate) static API_KEY: OnceLock<String> = OnceLock::new();
 pub(crate) static TELEGRAM_API_KEY: OnceLock<String> = OnceLock::new();
-pub(crate) static TELEGRAM_CHAT_ID: OnceLock<String> = OnceLock::new();
+pub(crate) static TELEGRAM_CHAT_ID_PUBLIC: OnceLock<i64> = OnceLock::new();
+pub(crate) static TELEGRAM_CHAT_ID_PRIVATE: OnceLock<i64> = OnceLock::new();
 
 #[derive(Parser)]
 #[command(author = "Frostie314159", version)]
@@ -24,10 +25,11 @@ struct Cli {
 struct Config {
     api_key: String,
     telegram_api_key: String,
-    telegram_chat_id: String,
+    telegram_chat_id_public: i64,
+    telegram_chat_id_private: i64,
     rate_limiter_timeout: Option<usize>,
     rate_limiter_tokens: Option<usize>,
-    last_state_open: Option<bool>,
+    last_state: Option<usize>,
     last_state_change: Option<u64>,
 }
 
@@ -55,8 +57,11 @@ async fn main() {
     TELEGRAM_API_KEY
         .set(config.telegram_api_key.clone())
         .unwrap();
-    TELEGRAM_CHAT_ID
-        .set(config.telegram_chat_id.clone())
+    TELEGRAM_CHAT_ID_PUBLIC
+        .set(config.telegram_chat_id_public.clone())
+        .unwrap();
+    TELEGRAM_CHAT_ID_PRIVATE
+        .set(config.telegram_chat_id_private.clone())
         .unwrap();
 
     let (tx, _rx) = tokio::sync::broadcast::channel::<APIEvent>(1);
