@@ -1,4 +1,5 @@
 use std::{
+    io::SeekFrom,
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::{Duration, UNIX_EPOCH},
 };
@@ -10,11 +11,19 @@ use actix_web::{
 };
 use log::{error, info, warn};
 use spaceapi::{Contact, Location, StatusBuilder};
+use tokio::{
+    fs::File,
+    io::{AsyncSeekExt, AsyncWriteExt},
+    sync::{Mutex, MutexGuard},
+};
 
 use crate::{Config, API_KEY};
 
 fn is_api_key_valid(req: &HttpRequest) -> bool {
-    req.headers().get("Api-Key").map(|x| x.to_str().unwrap().to_string()) == API_KEY.get().cloned()
+    req.headers()
+        .get("Api-Key")
+        .map(|x| x.to_str().unwrap().to_string())
+        == API_KEY.get().cloned()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -26,6 +35,8 @@ struct State {
     tx: tokio::sync::broadcast::Sender<APIEvent>,
     open: AtomicBool,
     last_changed: AtomicU64,
+    config: Mutex<Config>,
+    config_file: Mutex<File>,
 }
 impl State {
     pub fn reset_last_change(&self) {
@@ -35,6 +46,15 @@ impl State {
             .as_secs();
         self.last_changed.store(time, Ordering::Relaxed);
     }
+}
+async fn write_config_file(data: web::Data<State>, config_lock_guard: MutexGuard<'_, Config>) {
+    let mut config_file = data.config_file.lock().await;
+    config_file.seek(SeekFrom::Start(0)).await.unwrap();
+    config_file.set_len(0).await.unwrap();
+    config_file
+        .write(toml::to_string(&*config_lock_guard).unwrap().as_bytes())
+        .await
+        .unwrap();
 }
 #[get("/open")]
 async fn open(req: HttpRequest, data: web::Data<State>) -> impl Responder {
@@ -49,6 +69,11 @@ async fn open(req: HttpRequest, data: web::Data<State>) -> impl Responder {
         .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
     {
         data.reset_last_change();
+        let mut config_lock_guard = data.config.lock().await;
+        config_lock_guard.last_state_change = Some(data.last_changed.load(Ordering::Relaxed));
+        config_lock_guard.last_state_open = Some(true);
+
+        write_config_file(data.clone(), config_lock_guard).await;
         return match data.tx.send(APIEvent::Open) {
             Ok(_) => HttpResponse::Ok(),
             Err(_) => {
@@ -74,6 +99,11 @@ async fn close(req: HttpRequest, data: web::Data<State>) -> impl Responder {
         .compare_exchange(true, false, Ordering::Acquire, Ordering::Relaxed)
     {
         data.reset_last_change();
+        let mut config_lock_guard = data.config.lock().await;
+        config_lock_guard.last_state_change = Some(data.last_changed.load(Ordering::Relaxed));
+        config_lock_guard.last_state_open = Some(false);
+
+        write_config_file(data.clone(), config_lock_guard).await;
         return match data.tx.send(APIEvent::Close) {
             Ok(_) => HttpResponse::Ok(),
             Err(_) => {
@@ -132,14 +162,18 @@ async fn index(req: HttpRequest) -> impl Responder {
         .inspect(|peer_addr| info!("Received GET to /open from {peer_addr}."));
     ("I'm an API not a webserver.", StatusCode::IM_A_TEAPOT)
 }
-pub async fn run(tx: tokio::sync::broadcast::Sender<APIEvent>, config: Config) {
+pub async fn run(tx: tokio::sync::broadcast::Sender<APIEvent>, config: Config, config_file: File) {
     let state = web::Data::new(State {
         tx,
-        open: AtomicBool::new(false),
-        last_changed: AtomicU64::new(0),
+        open: AtomicBool::new(config.last_state_open.unwrap_or_default()),
+        last_changed: AtomicU64::new(config.last_state_change.unwrap_or_default()),
+        config: Mutex::new(config.clone()),
+        config_file: Mutex::new(config_file),
     });
     let governor_config = GovernorConfigBuilder::default()
-        .period(Duration::from_secs(config.rate_limiter_timeout.unwrap_or(300) as u64))
+        .period(Duration::from_secs(
+            config.rate_limiter_timeout.unwrap_or(300) as u64,
+        ))
         .burst_size(config.rate_limiter_tokens.unwrap_or(2) as u32)
         .finish()
         .unwrap();

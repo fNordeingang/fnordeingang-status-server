@@ -1,11 +1,10 @@
-#![feature(result_option_inspect)]
-
 use std::{path::PathBuf, sync::OnceLock};
 
 use crate::server::APIEvent;
 use clap::Parser;
 use log::info;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use tokio::{fs::OpenOptions, io::AsyncReadExt};
 
 mod actions;
 mod server;
@@ -21,13 +20,15 @@ struct Cli {
     config: PathBuf,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize, Clone)]
 struct Config {
     api_key: String,
     telegram_api_key: String,
     telegram_chat_id: String,
     rate_limiter_timeout: Option<usize>,
     rate_limiter_tokens: Option<usize>,
+    last_state_open: Option<bool>,
+    last_state_change: Option<u64>,
 }
 
 #[actix_web::main]
@@ -37,21 +38,31 @@ async fn main() {
 
     info!("Starting fnord-status server.");
 
-    let config = toml::from_str::<Config>(
-        &tokio::fs::read_to_string(cli.config)
-            .await
-            .expect("Failed to read config file."),
-    )
-    .expect("Failed to parse config file.");
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .append(false)
+        .open(cli.config)
+        .await
+        .unwrap();
+
+    let mut buf = String::new();
+    file.read_to_string(&mut buf).await.unwrap();
+
+    let config = toml::from_str::<Config>(&buf).expect("Failed to parse config file.");
 
     API_KEY.set(config.api_key.clone()).unwrap();
-    TELEGRAM_API_KEY.set(config.telegram_api_key.clone()).unwrap();
-    TELEGRAM_CHAT_ID.set(config.telegram_chat_id.clone()).unwrap();
+    TELEGRAM_API_KEY
+        .set(config.telegram_api_key.clone())
+        .unwrap();
+    TELEGRAM_CHAT_ID
+        .set(config.telegram_chat_id.clone())
+        .unwrap();
 
     let (tx, _rx) = tokio::sync::broadcast::channel::<APIEvent>(1);
 
     futures::join!(
         actions::telegram::run_telegram_bot(tx.subscribe()),
-        server::run(tx, config)
+        server::run(tx, config, file)
     );
 }
