@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::OnceLock};
+use std::path::PathBuf;
 
 use crate::server::APIEvent;
 use clap::Parser;
@@ -9,11 +9,6 @@ use tokio::{fs::OpenOptions, io::AsyncReadExt};
 mod actions;
 mod server;
 
-pub(crate) static API_KEY: OnceLock<String> = OnceLock::new();
-pub(crate) static TELEGRAM_API_KEY: OnceLock<String> = OnceLock::new();
-pub(crate) static TELEGRAM_CHAT_ID_PUBLIC: OnceLock<i64> = OnceLock::new();
-pub(crate) static TELEGRAM_CHAT_ID_PRIVATE: OnceLock<i64> = OnceLock::new();
-
 #[derive(Parser)]
 #[command(author = "Frostie314159", version)]
 struct Cli {
@@ -23,14 +18,38 @@ struct Cli {
 
 #[derive(Deserialize, Serialize, Clone)]
 struct Config {
-    api_key: String,
+    // Telegram API
     telegram_api_key: String,
     telegram_chat_id_public: i64,
     telegram_chat_id_private: i64,
-    rate_limiter_timeout: Option<usize>,
-    rate_limiter_tokens: Option<usize>,
+
+    // State
     last_state: Option<usize>,
     last_state_change: Option<u64>,
+
+    // Messages
+    general_close: String,
+    general_open: String,
+    member_close: String,
+    member_open: String,
+
+    // Server
+    api_key: String,
+    api_port: Option<u16>,
+    api_address: Option<String>,
+    rate_limiter_timeout: Option<usize>,
+    rate_limiter_tokens: Option<usize>,
+
+    // Spaceapi
+    space_name: String,
+    logo: String,
+    url: String,
+    address: String,
+    latitude: f64,
+    longitude: f64,
+    email: String,
+    mastodon: String,
+    issue_mail: String,
 }
 
 #[actix_web::main]
@@ -53,21 +72,10 @@ async fn main() {
 
     let config = toml::from_str::<Config>(&buf).expect("Failed to parse config file.");
 
-    API_KEY.set(config.api_key.clone()).unwrap();
-    TELEGRAM_API_KEY
-        .set(config.telegram_api_key.clone())
-        .unwrap();
-    TELEGRAM_CHAT_ID_PUBLIC
-        .set(config.telegram_chat_id_public.clone())
-        .unwrap();
-    TELEGRAM_CHAT_ID_PRIVATE
-        .set(config.telegram_chat_id_private.clone())
-        .unwrap();
-
     let (tx, _rx) = tokio::sync::broadcast::channel::<APIEvent>(1);
 
     futures::join!(
-        actions::telegram::run_telegram_bot(tx.subscribe()),
+        actions::telegram::run_telegram_bot(tx.subscribe(), config.clone()),
         server::run(tx, config, file)
     );
 }

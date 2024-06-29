@@ -21,13 +21,10 @@ const STATE_CLOSED: usize = 0;
 const STATE_OPEN_INTERN: usize = 1;
 const STATE_OPEN: usize = 2;
 
-use crate::{Config, API_KEY};
+use crate::Config;
 
-fn is_api_key_valid(req: &HttpRequest) -> bool {
-    req.headers()
-        .get("Api-Key")
-        .map(|x| x.to_str().unwrap().to_string())
-        == API_KEY.get().cloned()
+fn is_api_key_valid(req: &HttpRequest, api_key: &str) -> bool {
+    req.headers().get("Api-Key").map(|x| x.to_str().unwrap()) == Some(api_key)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -65,22 +62,17 @@ async fn write_config_file(data: web::Data<State>, config_lock_guard: MutexGuard
 async fn open(req: HttpRequest, data: web::Data<State>) -> impl Responder {
     req.peer_addr()
         .inspect(|peer_addr| info!("Received GET to /open from {peer_addr}."));
-    if !is_api_key_valid(&req) {
+    let mut config = data.config.lock().await;
+    if !is_api_key_valid(&req, &config.api_key) {
         warn!("Api key missing or invalid.");
         return HttpResponse::Unauthorized();
     }
-    if let Ok(STATE_CLOSED) | Ok(STATE_OPEN_INTERN) = data.state.compare_exchange(
-        STATE_CLOSED,
-        STATE_OPEN,
-        Ordering::Acquire,
-        Ordering::Relaxed,
-    ) {
+    if let STATE_CLOSED | STATE_OPEN_INTERN = data.state.load(Ordering::Relaxed) {
         data.reset_last_change();
-        let mut config_lock_guard = data.config.lock().await;
-        config_lock_guard.last_state_change = Some(data.last_changed.load(Ordering::Relaxed));
-        config_lock_guard.last_state = Some(STATE_OPEN);
+        config.last_state_change = Some(data.last_changed.load(Ordering::Relaxed));
+        config.last_state = Some(STATE_OPEN);
 
-        write_config_file(data.clone(), config_lock_guard).await;
+        write_config_file(data.clone(), config).await;
         data.state.store(STATE_OPEN, Ordering::Relaxed);
 
         match data.tx.send(APIEvent::Open) {
@@ -99,7 +91,8 @@ async fn open(req: HttpRequest, data: web::Data<State>) -> impl Responder {
 async fn open_intern(req: HttpRequest, data: web::Data<State>) -> impl Responder {
     req.peer_addr()
         .inspect(|peer_addr| info!("Received GET to /open_intern from {peer_addr}."));
-    if !is_api_key_valid(&req) {
+    let mut config = data.config.lock().await;
+    if !is_api_key_valid(&req, &config.api_key) {
         warn!("Api key missing or invalid.");
         return HttpResponse::Unauthorized();
     }
@@ -112,11 +105,10 @@ async fn open_intern(req: HttpRequest, data: web::Data<State>) -> impl Responder
         error!("Last state is invalid. Forcing requested state.");
     }
     data.reset_last_change();
-    let mut config_lock_guard = data.config.lock().await;
-    config_lock_guard.last_state_change = Some(data.last_changed.load(Ordering::Relaxed));
-    config_lock_guard.last_state = Some(STATE_OPEN_INTERN);
+    config.last_state_change = Some(data.last_changed.load(Ordering::Relaxed));
+    config.last_state = Some(STATE_OPEN_INTERN);
 
-    write_config_file(data.clone(), config_lock_guard).await;
+    write_config_file(data.clone(), config).await;
     data.state.store(STATE_OPEN_INTERN, Ordering::Relaxed);
 
     match data.tx.send(APIEvent::OpenIntern) {
@@ -131,7 +123,8 @@ async fn open_intern(req: HttpRequest, data: web::Data<State>) -> impl Responder
 async fn close(req: HttpRequest, data: web::Data<State>) -> impl Responder {
     req.peer_addr()
         .inspect(|peer_addr| info!("Received GET to /close from {peer_addr}."));
-    if !is_api_key_valid(&req) {
+    let mut config = data.config.lock().await;
+    if !is_api_key_valid(&req, &config.api_key) {
         warn!("Api key missing or invalid.");
         return HttpResponse::Unauthorized();
     }
@@ -144,11 +137,10 @@ async fn close(req: HttpRequest, data: web::Data<State>) -> impl Responder {
         error!("Last state is invalid. Forcing requested state.");
     }
     data.reset_last_change();
-    let mut config_lock_guard = data.config.lock().await;
-    config_lock_guard.last_state_change = Some(data.last_changed.load(Ordering::Relaxed));
-    config_lock_guard.last_state = Some(STATE_CLOSED);
+    config.last_state_change = Some(data.last_changed.load(Ordering::Relaxed));
+    config.last_state = Some(STATE_CLOSED);
 
-    write_config_file(data.clone(), config_lock_guard).await;
+    write_config_file(data.clone(), config).await;
     data.state.store(STATE_CLOSED, Ordering::Relaxed);
 
     match data.tx.send(APIEvent::Close) {
@@ -163,27 +155,28 @@ async fn close(req: HttpRequest, data: web::Data<State>) -> impl Responder {
 async fn spaceapi_json(req: HttpRequest, data: web::Data<State>) -> impl Responder {
     req.peer_addr()
         .inspect(|peer_addr| info!("Received GET to /spaceapi.json from {peer_addr}."));
-    let status = StatusBuilder::mixed("fNordeingang")
-        .logo("https://fnordeingang.de/wp-content/uploads/2013/06/logo_final21.png")
-        .url("https://fnordeingang.de")
+    let config = data.config.lock().await;
+    let status = StatusBuilder::mixed(config.space_name.as_str())
+        .logo(config.logo.as_str())
+        .url(config.url.as_str())
         .state(spaceapi::State {
             open: Some(data.state.load(Ordering::Relaxed) == STATE_OPEN),
             lastchange: Some(data.last_changed.load(Ordering::Relaxed)),
             ..Default::default()
         })
         .location(Location {
-            address: Some("Körnerstr. 72, 41464 Neuss, Germany".to_string()),
-            lat: 51.186234,
-            lon: 6.692624,
+            address: Some(config.address.clone()),
+            lat: config.latitude,
+            lon: config.longitude,
             ..Default::default()
         })
         .contact(Contact {
-            email: Some("verein@fnordeingang.de".to_string()),
-            mastodon: Some("@fnordeingang@telefant.net".to_string()),
-            issue_mail: Some("vorstand@fnordeingang.de".to_string()),
+            email: Some(config.email.clone()),
+            mastodon: Some(config.mastodon.clone()),
+            issue_mail: Some(config.issue_mail.clone()),
             ..Default::default()
         })
-        .add_project("http://github.com/fnordeingang")
+        .add_project("https://github.com/fNordeingang/fnordeingang-status-server")
         .add_issue_report_channel(spaceapi::IssueReportChannel::IssueMail)
         .add_extension("ccc", "chaostreff")
         .build();
@@ -240,5 +233,5 @@ pub async fn run(tx: tokio::sync::broadcast::Sender<APIEvent>, config: Config, c
     .expect("Failed to bind to address.")
     .run()
     .await
-    .expect("Failed to initialize api server.");
+    .expect("Failed to initialize API server.");
 }
