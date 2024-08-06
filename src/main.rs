@@ -23,6 +23,10 @@ struct Config {
     telegram_chat_id_public: i64,
     telegram_chat_id_private: i64,
 
+    // Mastodon API
+    mastodon_instance: String,
+    mastodon_access_token: String,
+
     // State
     last_state: Option<usize>,
     last_state_change: Option<u64>,
@@ -76,6 +80,7 @@ async fn main() {
 
     futures::join!(
         actions::telegram::run_telegram_bot(tx.subscribe(), config.clone()),
+        actions::mastodon::run_mastodon_bot(tx.subscribe(), config.clone()),
         server::run(tx, config, file)
     );
 }
