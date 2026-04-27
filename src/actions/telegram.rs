@@ -29,7 +29,7 @@ pub async fn run_telegram_bot(mut rx: tokio::sync::broadcast::Receiver<APIEvent>
                 send_message_to_channel(&bot, &config.general_close, true, &config).await;
             }
             (Some(APIEvent::Open), APIEvent::OpenIntern) => {
-                send_message_to_channel(&bot, &config.member_open, false, &config).await;
+                //send_message_to_channel(&bot, &config.member_open, false, &config).await;
                 send_message_to_channel(&bot, &config.general_close, true, &config).await;
             }
             (_, APIEvent::OpenIntern) => {
